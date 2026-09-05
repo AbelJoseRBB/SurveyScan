@@ -1,0 +1,27 @@
+# Ambiente virtual
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.vscode/
+.idea/
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
+
+# Saídas do projeto
+output/
+*.xlsx
+
+# Imagens de teste
+formularios/
+
+# Logs
+*.log

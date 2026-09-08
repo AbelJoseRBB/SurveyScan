@@ -45,8 +45,11 @@ def loadImage(image_path: str) -> np.ndarray:
 
     return img
 
+def grayscaleImage(image: np.ndarray) -> np.ndarray:
+    return cv.cvtColor(image,cv.COLOR_BGR2GRAY)
 
 
+# função antiga 
 def preprocessImage(image: np.ndarray) -> np.ndarray:
     # conversão da imagem para cinza
     gray_img = cv.cvtColor(image, cv.COLOR_BGR2GRAY)

@@ -1,79 +1,79 @@
-# Ativar venv
-# .\venv\Scripts\Activate.ps1
-
 from image_processor import (
-    preprocessImage,
-    pdfToImage
+    pdfToImage,
+    grayscaleImage
 )
 
 from answer_reader import (
-    cropRegion,
-    getFillScore,
-    readMark,
-    drawTestX
+    readSingleChoiceQuestion
+)
+
+from config import (
+    INPUT_DIR,
+    QUESTION_COORDINATES
 )
 
 
 def main():
+
+    pdf_path = INPUT_DIR / "Forms75_.pdf"
+
     pages = pdfToImage(
-        "formularios/Forms.pdf"
+        str(pdf_path)
     )
 
-    print(f"Paginas encontradas: {len(pages)}")
-
-    # Processa a primeira página
-    processed = preprocessImage(
-        pages[0]
+    print(
+        f"Paginas encontradas: {len(pages)}"
     )
 
-    # Região interna da alternativa Masculino
-    masculino_coords = (
-        627,
-        765,
-        655,
-        797
-    )
+    # Converte as páginas para grayscale
+    gray_pages = {
+        1: grayscaleImage(pages[0]),
+        2: grayscaleImage(pages[1])
+    }
 
-    # Teste 1: alternativa vazia
-    empty_region = cropRegion(
-        processed,
-        *masculino_coords
-    )
+    print("\n===== TESTE PAGINA 1 =====")
 
-    empty_score = getFillScore(
-        empty_region
-    )
+    # Questões normais da página 1
+    for question_name, options in QUESTION_COORDINATES[1].items():
 
-    empty_marked = readMark(
-        processed,
-        masculino_coords
-    )
+        # Q12 é um grupo de subquestões
+        if question_name == "q12":
+            continue
 
-    print("\n--- Teste vazio ---")
-    print(f"Score: {empty_score}")
-    print(f"Marcado: {empty_marked}")
+        answer = readSingleChoiceQuestion(
+            gray_pages[1],
+            options
+        )
 
-    # Teste 2: cria um X artificial na região
-    marked_region = drawTestX(
-        empty_region
-    )
+        print(
+            f"{question_name}: {answer}"
+        )
 
-    marked_score = getFillScore(
-        marked_region
-    )
+    print("\n===== TESTE Q12 =====")
 
-    print("\n--- Teste com X artificial ---")
-    print(f"Score: {marked_score}")
+    for subquestion_name, options in QUESTION_COORDINATES[1]["q12"].items():
 
-    # Aqui testamos diretamente a lógica do threshold
-    # usando a região já marcada artificialmente
-    from answer_reader import isMarked
+        answer = readSingleChoiceQuestion(
+            gray_pages[1],
+            options
+        )
 
-    marked_result = isMarked(
-        marked_region
-    )
+        print(
+            f"{subquestion_name}: {answer}"
+        )
 
-    print(f"Marcado: {marked_result}")
+    print("\n===== TESTE PAGINA 2 =====")
+
+    for question_name, options in QUESTION_COORDINATES[2].items():
+
+        answer = readSingleChoiceQuestion(
+            gray_pages[2],
+            options
+        )
+
+        print(
+            f"{question_name}: {answer}"
+        )
 
 
 if __name__ == "__main__":

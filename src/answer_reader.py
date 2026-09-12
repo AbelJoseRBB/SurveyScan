@@ -1,6 +1,4 @@
-import cv2 as cv
 import numpy as np
-
 
 def cropRegion(image: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> np.ndarray:
     return image[y1:y2, x1:x2]
@@ -9,7 +7,6 @@ def getGrayMean(region: np.ndarray) -> float:
     return float(np.mean(region))
 
 def isMarked(region: np.ndarray, threshold: float = 245.0) -> bool:
-    mean = float(np.mean(region))
     return getGrayMean(region) < threshold
 
 def readMark(image: np.ndarray, coordinates: tuple[int, int, int, int], threshold: float = 245.0) -> bool:
@@ -17,45 +14,38 @@ def readMark(image: np.ndarray, coordinates: tuple[int, int, int, int], threshol
     return isMarked(region, threshold)
 
 def readSingleChoiceQuestion(image: np.ndarray, options: dict[str, tuple[int, int, int, int]], threshold: float = 245.0) -> str | None:
+    marked_answers = []
+
     for answer, coordinates in options.items():
         if readMark(image, coordinates, threshold):
-            return answer
-    return None
+            marked_answers.append(answer)
 
+    if len(marked_answers) == 0:
+        return "EM BRANCO"
+    if len(marked_answers) > 1:
+        return "AMBÍGUA"
+    
+    return marked_answers[0]
 
-# função para teste
-def getGrayStats(region: np.ndarray) -> tuple[float, int, int]:
-    mean = float(np.mean(region))
-    minimum = int(np.min(region))
-    maximum = int(np.max(region))
+def readForm(pages: dict[int, np.ndarray], question_coordinates: dict) -> dict:
+    answers = {}
 
-    return mean, minimum, maximum
+    # Página 1
+    for question_name, options in question_coordinates[1].items():
 
+        # Q12 possuoi subquestoes
+        if question_name == "q12":
+            q12_answers = {}
 
-def drawTestX(
-    image: np.ndarray,
-    coordinates: tuple[int, int, int, int],
-    thickness: int = 3
-) -> np.ndarray:
+            for subquestion_name, sub_options in options.items():
+                q12_answers[subquestion_name] = readSingleChoiceQuestion(pages[1], sub_options)
+                answers["q12"] = q12_answers
 
-    test_image = image.copy()
+        else:
+            answers[question_name] = readSingleChoiceQuestion(pages[1], options)
 
-    x1, y1, x2, y2 = coordinates
+    # Página 2
+    for question_name, options in question_coordinates[2].items():
+        answers[question_name] = readSingleChoiceQuestion(pages[2], options)
 
-    cv.line(
-        test_image,
-        (x1, y1),
-        (x2, y2),
-        255,
-        thickness
-    )
-
-    cv.line(
-        test_image,
-        (x2, y1),
-        (x1, y2),
-        255,
-        thickness
-    )
-
-    return test_image
+    return answers    

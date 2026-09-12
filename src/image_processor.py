@@ -2,8 +2,6 @@ from pathlib import Path
 import cv2 as cv
 import numpy as np 
 import pymupdf 
-import sys
-
 
 def pdfToImage(pdf_path: str, dpi: int = 300) -> list[np.ndarray]:
     doc =  pymupdf.open(pdf_path)
@@ -35,45 +33,80 @@ def pdfToImage(pdf_path: str, dpi: int = 300) -> list[np.ndarray]:
 
     return imgs
 
-
-
-def loadImage(image_path: str) -> np.ndarray:
-    img = cv.imread(image_path)
-
-    if img is None:
-        sys.exit(f"ERROR: Could not read the image: {image_path}.")
-
-    return img
-
 def grayscaleImage(image: np.ndarray) -> np.ndarray:
     return cv.cvtColor(image,cv.COLOR_BGR2GRAY)
 
+def alignToTemplate(image: np.ndarray,template: np.ndarray) -> np.ndarray:
+    gray_image = grayscaleImage(image)
+    gray_template = grayscaleImage(template)
 
-# função antiga 
-def preprocessImage(image: np.ndarray) -> np.ndarray:
-    # conversão da imagem para cinza
-    gray_img = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    orb = cv.ORB_create( nfeatures=5000)
 
-    # binariza a imagem
-    binary = cv.threshold(
-        gray_img,
-        0,
-        255,
-        cv.THRESH_BINARY_INV + cv.THRESH_OTSU
-    )[1]
+    keypoints_image, descriptors_image = orb.detectAndCompute(gray_image,None)
 
-    return binary
+    keypoints_template, descriptors_template = orb.detectAndCompute(gray_template,None)
 
+    matcher = cv.BFMatcher(cv.NORM_HAMMING)
 
-def saveProcessedImage(image: np.ndarray, output_path: str) -> None:
+    matches = matcher.knnMatch(descriptors_image,descriptors_template,k=2)
+
+    good_matches = []
+
+    for m, n in matches:
+        if m.distance < 0.75 * n.distance:
+            good_matches.append(m)
+
+    if len(good_matches) < 4:
+        raise RuntimeError("Não foram encontrados pontos suficientes para alinhar o formulário.")
+
+    image_points = np.float32([keypoints_image[match.queryIdx].pt for match in good_matches])
+
+    template_points = np.float32([keypoints_template[match.trainIdx].pt for match in good_matches])
+
+    homography, mask = cv.findHomography(
+        image_points,
+        template_points,
+        cv.RANSAC,
+        5.0
+    )
+
+    if homography is None:
+        raise RuntimeError("Não foi possível calcular a homografia.")
+
+    height, width = template.shape[:2]
+
+    aligned = cv.warpPerspective(image,homography,(width, height),borderValue=(255, 255, 255))
+
+    return aligned
+
+def saveProcessedImage(
+    image: np.ndarray,
+    output_path: str
+) -> None:
+
     output = Path(output_path)
 
     output.parent.mkdir(
-        parents= True,
-        exist_ok= True
+        parents=True,
+        exist_ok=True
     )
 
-    cv.imwrite(str(output), image)
+    extension = output.suffix
 
-    
+    success, encoded = cv.imencode(
+        extension,
+        image
+    )
 
+    if not success:
+        raise RuntimeError(
+            f"Não foi possível codificar a imagem: {output.name}"
+        )
+
+    encoded.tofile(
+        str(output)
+    )
+
+    print(
+        f"Imagem salva em: {output.resolve()}"
+    )

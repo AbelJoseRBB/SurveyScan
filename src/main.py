@@ -1,79 +1,51 @@
 from image_processor import (
     pdfToImage,
+    alignToTemplate,
     grayscaleImage
 )
 
-from answer_reader import (
-    readSingleChoiceQuestion
+from text_reader import (
+    cropTextField,
+    readNumber
 )
 
 from config import (
     INPUT_DIR,
-    QUESTION_COORDINATES
+    TEXT_FIELDS
 )
 
 
 def main():
 
-    pdf_path = INPUT_DIR / "Forms75_.pdf"
+    template_pages = pdfToImage(
+        str(INPUT_DIR / "FormsVazio.pdf")
+    )
 
-    pages = pdfToImage(
-        str(pdf_path)
+    form_pages = pdfToImage(
+        str(INPUT_DIR / "FormsFullC.pdf")
+    )
+
+    aligned = alignToTemplate(
+        form_pages[0],
+        template_pages[0]
+    )
+
+    gray = grayscaleImage(
+        aligned
+    )
+
+    idade_region = cropTextField(
+        gray,
+        TEXT_FIELDS[1]["idade"]
+    )
+
+    idade = readNumber(
+        idade_region
     )
 
     print(
-        f"Paginas encontradas: {len(pages)}"
+        f"Idade reconhecida: {idade}"
     )
-
-    # Converte as páginas para grayscale
-    gray_pages = {
-        1: grayscaleImage(pages[0]),
-        2: grayscaleImage(pages[1])
-    }
-
-    print("\n===== TESTE PAGINA 1 =====")
-
-    # Questões normais da página 1
-    for question_name, options in QUESTION_COORDINATES[1].items():
-
-        # Q12 é um grupo de subquestões
-        if question_name == "q12":
-            continue
-
-        answer = readSingleChoiceQuestion(
-            gray_pages[1],
-            options
-        )
-
-        print(
-            f"{question_name}: {answer}"
-        )
-
-    print("\n===== TESTE Q12 =====")
-
-    for subquestion_name, options in QUESTION_COORDINATES[1]["q12"].items():
-
-        answer = readSingleChoiceQuestion(
-            gray_pages[1],
-            options
-        )
-
-        print(
-            f"{subquestion_name}: {answer}"
-        )
-
-    print("\n===== TESTE PAGINA 2 =====")
-
-    for question_name, options in QUESTION_COORDINATES[2].items():
-
-        answer = readSingleChoiceQuestion(
-            gray_pages[2],
-            options
-        )
-
-        print(
-            f"{question_name}: {answer}"
-        )
 
 
 if __name__ == "__main__":

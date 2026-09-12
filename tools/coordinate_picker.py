@@ -3,7 +3,15 @@ import cv2 as cv
 SCALE = 0.5
 Y_OFFSET = 0
 
-def showCoordinates(event, x, y, flags, param):
+
+def showCoordinates(
+    event,
+    x,
+    y,
+    flags,
+    param
+):
+
     if event == cv.EVENT_LBUTTONDOWN:
 
         real_x = int(x / SCALE)
@@ -15,11 +23,19 @@ def showCoordinates(event, x, y, flags, param):
 
 
 image = cv.imread(
-    "output/page2_processed.png"
+    "output/aligned_page1.png"
 )
 
-# Mostra somente a parte de baixo
-image = image[Y_OFFSET:, :]
+if image is None:
+    raise FileNotFoundError(
+        "Não foi possível abrir a imagem."
+    )
+
+
+image = image[
+    Y_OFFSET:,
+    :
+]
 
 display = cv.resize(
     image,

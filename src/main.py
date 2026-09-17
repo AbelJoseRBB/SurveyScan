@@ -1,3 +1,5 @@
+from config import INPUT_DIR, TEXT_FIELDS
+
 from image_processor import (
     pdfToImage,
     alignToTemplate,
@@ -5,17 +7,16 @@ from image_processor import (
 )
 
 from text_reader import (
-    cropTextField,
-    readNumber
-)
-
-from config import (
-    INPUT_DIR,
-    TEXT_FIELDS
+    loadDigitModels,
+    readAge
 )
 
 
 def main():
+
+    print("Carregando modelos...")
+
+    svm_model, knn_model = loadDigitModels()
 
     template_pages = pdfToImage(
         str(INPUT_DIR / "FormsVazio.pdf")
@@ -25,27 +26,24 @@ def main():
         str(INPUT_DIR / "FormsFullC.pdf")
     )
 
-    aligned = alignToTemplate(
+    aligned_page = alignToTemplate(
         form_pages[0],
         template_pages[0]
     )
 
-    gray = grayscaleImage(
-        aligned
+    gray_page = grayscaleImage(
+        aligned_page
     )
 
-    idade_region = cropTextField(
-        gray,
-        TEXT_FIELDS[1]["idade"]
+    age, needs_review = readAge(
+        gray_page,
+        TEXT_FIELDS[1]["idade"],
+        svm_model,
+        knn_model
     )
 
-    idade = readNumber(
-        idade_region
-    )
-
-    print(
-        f"Idade reconhecida: {idade}"
-    )
+    print(f"Idade reconhecida: {age}")
+    print(f"Revisar: {needs_review}")
 
 
 if __name__ == "__main__":

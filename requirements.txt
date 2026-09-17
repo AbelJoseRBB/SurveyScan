@@ -2,6 +2,6 @@ opencv-python
 numpy
 pandas
 openpyxl
-pytesseract
-Pillow
 PyMuPDF
+scikit-learn
+joblib

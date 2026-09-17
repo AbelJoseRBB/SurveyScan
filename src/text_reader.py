@@ -1,10 +1,9 @@
 import cv2 as cv
 import numpy as np
+from pathlib import Path
+import joblib
 
-def cropTextField(
-    image: np.ndarray,
-    coordinates: tuple[int, int, int, int]
-) -> np.ndarray:
+def cropTextField(image: np.ndarray, coordinates: tuple[int, int, int, int]) -> np.ndarray:
 
     x1, y1, x2, y2 = coordinates
 
@@ -14,9 +13,7 @@ def cropTextField(
     ]
 
 
-def segmentDigits(
-    image: np.ndarray
-) -> list[np.ndarray]:
+def segmentDigits(image: np.ndarray) -> list[np.ndarray]:
 
     # Garante que a imagem esteja em escala de cinza
     if len(image.shape) == 3:
@@ -105,38 +102,108 @@ def segmentDigits(
 
     return digits
 
-def normalizeDigit(
-    digit: np.ndarray,
-    size: int = 28
-) -> np.ndarray:
+def normalizeDigit(digit: np.ndarray, canvas_size: int = 28, digit_size: int = 20) -> np.ndarray:
 
-    # Encontra o tamanho atual
+    if len(digit.shape) == 3:
+        digit = cv.cvtColor(digit, cv.COLOR_BGR2GRAY)
+
     height, width = digit.shape[:2]
 
-    # Cria uma imagem quadrada com margem
-    side = max(height, width) + 20
+    scale = min(digit_size / height, digit_size/width)
+    new_width = max(1, int(round(width * scale)))
+    new_height = max(1, int(round(height * scale)))
 
-    canvas = np.zeros(
-        (side, side),
-        dtype=np.uint8
-    )
+    resized = cv.resize(digit, (new_width ,new_height), interpolation= cv.INTER_AREA)
 
-    # Centraliza o dígito
-    x_offset = (side - width) // 2
-    y_offset = (side - height) // 2
+    canvas = np.zeros((canvas_size, canvas_size), dtype= np.uint8)
+
+    x_offset = (canvas_size - new_width) // 2
+    y_offset = (canvas_size - new_height) // 2
 
     canvas[
-        y_offset:y_offset + height,
-        x_offset:x_offset + width
-    ] = digit
+        y_offset:y_offset + new_height,
+        x_offset:x_offset + new_width
+    ] = resized
 
-    # Redimensiona para 28x28
-    normalized = cv.resize(
-        canvas,
-        (size, size),
-        interpolation=cv.INTER_AREA
-    )
+    moments = cv.moments(canvas)
 
-    return normalized
+    if moments["m00"] != 0:
+        center_x = (moments["m10"]/ moments["m00"])
+        center_y = (moments["m01"]/ moments["m00"])
+
+        # Centro desejado da imagem
+        target_center = (canvas_size - 1) / 2
+
+        shift_x = int(round(target_center - center_x))
+        shift_y = int(round(target_center - center_y))
+
+        translation = np.float32([
+            [1, 0, shift_x],
+            [0, 1, shift_y]
+        ])
+
+        canvas = cv.warpAffine(
+            canvas,
+            translation,
+            (canvas_size, canvas_size),
+            borderValue=0
+        )
+    return canvas
+
+def loadDigitModels():
+    base_dir = Path(__file__).parent.parent
+    model_path = base_dir / "models"
+
+    svm_model = joblib.load(model_path/"digit_svm.pkl")
+    knn_model = joblib.load(model_path/"digit_knn.pkl")
+
+    return svm_model, knn_model
+
+def predictDigit(digit: np.ndarray, svm_model, knn_model) -> tuple[int, bool]:
+    normalized = normalizeDigit(digit)
+
+    sample = normalized.reshape(1, -1)
+    sample = sample.astype(np.float32) / 255.0
+
+    svm_prediction = svm_model.predict(sample)[0]
+    knn_prediction = knn_model.predict(sample)[0]
+    models_agree = (svm_prediction == knn_prediction)
+    
+    return svm_prediction, models_agree
+
+def readNumber(image:np.ndarray, coordinates: tuple[int, int, int , int], svm_model, knn_model) -> str:
+    field = cropTextField(image, coordinates)
+    digits = segmentDigits(field)
+
+    if len(digits) == 0:
+        return "EM BRANCO"
+    result = ""
+    needs_review = False
+    
+    for digit in digits:
+        prediction, models_agree = predictDigit(digit, svm_model, knn_model)
+        result += str(prediction)
+
+        if not models_agree:
+            needs_review = True
+
+    return result, needs_review
+
+def readAge(image: np.ndarray, coordinates: tuple[int, int, int, int], svm_model, knn_model) -> tuple[str, bool]:
+    value, needs_review = readNumber(image, coordinates, svm_model, knn_model)
+
+    if value == "EM BRANCO":
+        return value, False
+
+    try:
+        age = int(value)
+    except ValueError:
+        return value, True
+
+    if age < 15 or age > 100:
+        needs_review = True
+
+    return str(age), needs_review
+
 
 

@@ -140,8 +140,8 @@ TEXT_FIELDS = {
     1: {
         "questionario_numero": (846, 448, 1116, 504),
         "idade": (776, 674, 1282, 742),
-        "religiao_outra": None,
-        "ocupacao": None,
+        "religiao_outra": (924, 1206, 1352, 1260),
+        "ocupacao": (912, 1278, 1612, 1330),
         "renda_valor": (1224, 1344, 1842, 1394),
         "quantidade_filhos": (1150, 1408, 1496, 1458),
     },

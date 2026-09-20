@@ -5,3 +5,6 @@ openpyxl
 PyMuPDF
 scikit-learn
 joblib
+transformers
+torch
+Pillow

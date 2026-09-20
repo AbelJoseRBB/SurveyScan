@@ -5,7 +5,8 @@ from config import (
     OUTPUT_DIR,
     QUESTION_COORDINATES,
     TEXT_FIELDS,
-    ANO_COLETA
+    ANO_COLETA,
+    EXCEL_FILE
 )
 
 from image_processor import (
@@ -25,7 +26,7 @@ from readers.text_reader import (
 from readers.handwriting_reader import loadHandwritingModel
 from readers.easyocr_reader import loadEasyOCR
 from readers.handwriting_comparison import readHandwrittenFields
-
+from excel_exporter import exportQuestionnaires
 
 def main():
 
@@ -165,6 +166,7 @@ def main():
     else:
         print("Nenhum campo sinalizado para revisão.")
 
+    exportQuestionnaires(questionnaires=[questionnaire_result], output_path=Path(OUTPUT_DIR) / EXCEL_FILE)   
 
 if __name__ == "__main__":
     main()

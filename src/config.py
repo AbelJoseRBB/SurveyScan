@@ -135,7 +135,6 @@ QUESTION_COORDINATES = {
     }
 }
 
-
 TEXT_FIELDS = {
     1: {
         "questionario_numero": (846, 448, 1116, 504),

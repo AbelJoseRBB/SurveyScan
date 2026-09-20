@@ -60,7 +60,7 @@ def normalizeDigit(digit: np.ndarray, canvas_size: int = 28, digit_size: int = 2
     return canvas
 
 def loadDigitModels():
-    base_dir = Path(__file__).parent.parent
+    base_dir = Path(__file__).parent.parent.parent  
     model_path = base_dir / "models"
 
     svm_model = joblib.load(model_path/"digit_svm.pkl")

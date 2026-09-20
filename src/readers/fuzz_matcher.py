@@ -109,7 +109,6 @@ OCCUPATIONS = [
     "Açougueiro",
     "Açougueira",
     "Churrasqueiro",
-    "Churrasqueira",
 
     # Serviços gerais e domésticos
     "Diarista",
@@ -300,7 +299,6 @@ RELIGIONS = [
     "Agnóstico",
     "Agnóstica",
     "Agnosticismo",
-    "Creio em Deus",
     "Espiritualista",
     "Espiritualizado",
     "Espiritualizada",
@@ -310,15 +308,15 @@ RELIGIONS = [
 
 def suggestText(text: str, vocabulary: list[str]) -> dict:
 
-    if not text or not text.strip():
-        return {"sugestao": None, "similaridade": 0}
+    if not text or not text.strip() or not vocabulary:
+        return {"sugestao": None, "similaridade": 0.0}
 
     result = process.extractOne(text, vocabulary, scorer=fuzz.WRatio)
 
     if result is None:
         return {
             "sugestao": None,
-            "similaridade": 0
+            "similaridade": 0.0
         }
 
     suggestion, similarity, _ = result

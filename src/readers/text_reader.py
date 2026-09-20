@@ -1,19 +1,9 @@
 from pathlib import Path
 from datetime import datetime
+from readers.answer_reader import cropRegion
 import cv2 as cv
 import numpy as np
 import joblib
-
-def cropTextField(image: np.ndarray, coordinates: tuple[int, int, int, int]) -> np.ndarray:
-
-    x1, y1, x2, y2 = coordinates
-
-    return image[y1:y2, x1:x2]
-
-
-def segmentDigits(image: np.ndarray) -> list[np.ndarray]:
-    regions = segmentDigitsWithPositions(image)
-    return [digit for digit, _, _, _, _ in regions]
 
 def normalizeDigit(digit: np.ndarray, canvas_size: int = 28, digit_size: int = 20) -> np.ndarray:
 
@@ -60,7 +50,7 @@ def normalizeDigit(digit: np.ndarray, canvas_size: int = 28, digit_size: int = 2
     return canvas
 
 def loadDigitModels():
-    base_dir = Path(__file__).parent.parent.parent  
+    base_dir = Path(__file__).resolve().parent.parent.parent  
     model_path = base_dir / "models"
 
     svm_model = joblib.load(model_path/"digit_svm.pkl")
@@ -80,23 +70,29 @@ def predictDigit(digit: np.ndarray, svm_model, knn_model) -> tuple[int, bool]:
     
     return svm_prediction, models_agree
 
-def readNumber(image:np.ndarray, coordinates: tuple[int, int, int , int], svm_model, knn_model) -> tuple[str, bool]:
-    field = cropTextField(image, coordinates)
-    digits = segmentDigits(field)
 
-    if len(digits) == 0:
-        return "EM BRANCO", True
-    result = ""
+def recognizeDigits(digit_regions: list, svm_model, knn_model) -> tuple[str, bool]:
+    # Reconhece os dígitos segmentados e verifica se os modelos concordam.
+    digits = []
     needs_review = False
-    
-    for digit in digits:
+
+    for digit, *_ in digit_regions:
         prediction, models_agree = predictDigit(digit, svm_model, knn_model)
-        result += str(prediction)
+        digits.append(str(prediction))
 
         if not models_agree:
             needs_review = True
 
-    return result, needs_review
+    return "".join(digits), needs_review
+
+def readNumber(image:np.ndarray, coordinates: tuple[int, int, int , int], svm_model, knn_model) -> tuple[str, bool]:
+    field = cropRegion(image, *coordinates)
+    digit_regions = segmentDigitsWithPositions(field)
+
+    if not digit_regions:
+        return "EM BRANCO", True
+
+    return recognizeDigits(digit_regions, svm_model, knn_model)
 
 def readAge(image: np.ndarray, coordinates: tuple[int, int, int, int], svm_model, knn_model) -> tuple[str, bool]:
     value, needs_review = readNumber(image, coordinates, svm_model, knn_model)
@@ -114,61 +110,44 @@ def readAge(image: np.ndarray, coordinates: tuple[int, int, int, int], svm_model
 
     return str(age), needs_review
 
+def numericResult(value: str, needs_review: bool) -> dict:
+    return {"valor": value, "revisar": needs_review}
+
 def readNumericFields(image: np.ndarray, text_fields: dict, objective_answers: dict, svm_model, knn_model) -> dict:
 
     results = {}
 
     # Numero Questionario 
     number, needs_review = readNumber(image, text_fields["questionario_numero"], svm_model, knn_model)
-
-    results["questionario_numero"] = {
-        "valor" : number,
-        "revisar" : needs_review or number == "EM BRANCO"
-    }
+    results["questionario_numero"] = numericResult(number, needs_review or number == "EM BRANCO")
 
     # Idade
     age, needs_review = readAge(image, text_fields["idade"], svm_model, knn_model)
-
-    results["idade"] = {
-        "valor": age,
-        "revisar": needs_review or age == "EM BRANCO"
-    }
+    results["idade"] = numericResult(age, needs_review or age == "EM BRANCO")
 
     # Quantidade de filhos
     if objective_answers["tem_filhos"] == "Sim":
-
         quant, needs_review = readNumber(image, text_fields["quantidade_filhos"], svm_model, knn_model)
-        
-        results["quantidade_filhos"] = {
-            "valor": quant,
-            "revisar": (needs_review or quant == "EM BRANCO" or (quant.isdigit() and int(quant) == 0))
-        }
+        needs_review = needs_review or quant == "EM BRANCO" or (quant.isdigit() and int(quant) == 0)
+        results["quantidade_filhos"] = numericResult(quant, needs_review)
+    elif objective_answers["tem_filhos"] == "Não":
+        results["quantidade_filhos"] = numericResult("0", False)
     else:
-        results["quantidade_filhos"] ={
-            "valor": "0" if objective_answers["tem_filhos"] == "Não"
-            else "Verificar Resposta",
-            "revisar": objective_answers["tem_filhos"] != "Não"
-        }
+        results["quantidade_filhos"] = numericResult("VERIFCAR", True)
     
     # Renda Mensal 
     if objective_answers["renda_mensal"] == "Sim":
-
         valor, needs_review = readIncome(image, text_fields["renda_valor"], svm_model, knn_model)
-                
-        results["renda_valor"] = {
-            "valor": valor,
-            "revisar": needs_review or valor == "EM BRANCO"
-        }
+        results["renda_valor"]= numericResult(valor, needs_review or valor == "EM BRANCO")
+    elif objective_answers["renda_mensal"] == "Não":
+        results["renda_valor"] = numericResult("Não", False)
     else:
-        results["renda_valor"] = {
-            "valor": "NÃO SE APLICA" if objective_answers["renda_mensal"] == "Não"
-            else "Verificar Resposta",
-            "revisar": objective_answers["renda_mensal"] != "Não"
-        }
+        results["renda_valor"] = numericResult("VERIFICAR", True)
 
     return results
 
-def segmentDigitsWithPositions(image: np.ndarray) -> list[tuple[np.ndarray, int, int, int, int]]:
+def preprocessNumericField(image: np.ndarray) -> np.ndarray:
+    # Binariza o campo numérico e remove as linhas horizontais.
 
     if len(image.shape) == 3:
         gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
@@ -178,11 +157,13 @@ def segmentDigitsWithPositions(image: np.ndarray) -> list[tuple[np.ndarray, int,
     binary = cv.threshold(gray, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU)[1]
 
     horizontal_kernel = cv.getStructuringElement(cv.MORPH_RECT, (80, 1))
-
     horizontal_lines = cv.morphologyEx(binary, cv.MORPH_OPEN, horizontal_kernel)
 
-    without_lines = cv.subtract(binary, horizontal_lines)
+    return cv.subtract(binary, horizontal_lines)
 
+def segmentDigitsWithPositions(image: np.ndarray) -> list[tuple[np.ndarray, int, int, int, int]]:
+    # Segmenta os dígitos e retorna suas imagens e posições.
+    without_lines = preprocessNumericField(image)
     contours, _ = cv.findContours(without_lines, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
     digit_regions = []
@@ -197,57 +178,36 @@ def segmentDigitsWithPositions(image: np.ndarray) -> list[tuple[np.ndarray, int,
             continue
 
         digit_regions.append((x, y, w, h))
+    digit_regions.sort(key= lambda region: region[0])
 
-    digit_regions.sort(key=lambda region: region[0])
-
-    digits = []
-
-    for x, y, w, h in digit_regions:
-        digit = without_lines[y:y + h, x:x + w]
-        digits.append((digit, x, y, w, h))
-
-    return digits
+    return[
+        (without_lines[y:y + h, x:x + w], x, y, w, h)
+        for x, y, w, h in digit_regions
+    ]
 
 def findIncomeSeparators(image: np.ndarray, digit_regions: list)-> list[tuple[int, int, int, int]]:
-    if len(image.shape) == 3:
-        gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
-    else:
-        gray = image.copy()
+    # Localiza possíveis separadores entre os dígitos da renda.
 
-    binary = cv.threshold(gray, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU)[1]
-
-    horizontal_kernel = cv.getStructuringElement(cv.MORPH_RECT, (80, 1))
-    horizontal_lines = cv.morphologyEx(binary, cv.MORPH_OPEN, horizontal_kernel)
-
-    without_lines = cv.subtract(binary, horizontal_lines)
-
+    without_lines = preprocessNumericField(image)
     contours, _ = cv.findContours(without_lines, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-
     separators = []
 
     for contour in contours:
 
         x, y, w, h = cv.boundingRect(contour)
 
-        # Ignora componentes muito pequenos
-        if w < 2 or h < 2:
-            continue
-
-        # Ignora componentes grandes, provavelmente dígitos
-        if h >= 15:
+        # Ignora componentes muito pequenos e muito grandes
+        if w < 2 or h < 2 or h >= 15:
             continue
 
         # Verifica se o componente está entre dois dígitos
         for i in range(len(digit_regions) - 1):
-
             _, digit_x, _, digit_w, _ = digit_regions[i]
-
             _, next_x, _, _, _ = digit_regions[i + 1]
 
             digit_end = digit_x + digit_w
 
             if x >= digit_end and x + w <= next_x:
-
                 separators.append((x, y, w, h))
                 break
 
@@ -255,25 +215,13 @@ def findIncomeSeparators(image: np.ndarray, digit_regions: list)-> list[tuple[in
 
 def readIncome(image: np.ndarray, coordinates: tuple[int, int, int, int], svm_model, knn_model)-> tuple[str, bool]:
 
-    field = cropTextField(image, coordinates)
-
+    field = cropRegion(image, *coordinates)
     digit_regions = segmentDigitsWithPositions(field)
 
-    if len(digit_regions) == 0:
+    if not digit_regions:
         return "EM BRANCO", True
 
-    digits = ""
-    needs_review = False
-
-    for digit, _, _, _, _ in digit_regions:
-
-        prediction, models_agree = predictDigit(digit, svm_model, knn_model)
-
-        digits += str(prediction)
-
-        if not models_agree:
-            needs_review = True
-
+    digits, needs_review = recognizeDigits(digit_regions, svm_model, knn_model)
     separators = findIncomeSeparators(field, digit_regions)
 
     # Verifica se existe um separador antes dos dois últimos dígitos

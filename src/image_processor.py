@@ -1,58 +1,74 @@
 from pathlib import Path
+
 import cv2 as cv
-import numpy as np 
-import pymupdf 
+import numpy as np
+import pymupdf
 
-def pdfToImage(pdf_path: str, dpi: int = 300) -> list[np.ndarray]:
-    doc =  pymupdf.open(pdf_path)
-    imgs = []
 
-    for page in doc:
-        pixmap = page.get_pixmap(dpi=dpi)
+def pdfToImage(pdf_path: str | Path, dpi: int = 300) -> list[np.ndarray]:
+    """Converte as páginas de um PDF em imagens BGR."""
 
-        image = np.frombuffer(
-            pixmap.samples,
-            dtype=np.uint8
-        )
+    images = []
 
-        image = image.reshape(
-            pixmap.height,
-            pixmap.width,
-            pixmap.n
-        )
+    with pymupdf.open(str(pdf_path)) as doc:
+        for page in doc:
+            pixmap = page.get_pixmap(dpi=dpi, alpha=False)
 
-        # PyMuPDF fornece RGB/RGBA, enquanto OpenCV trabalha com BGR.
-        if pixmap.n == 4:
-            image = cv.cvtColor(image, cv.COLOR_RGBA2BGR)
-        else:
+            image = np.frombuffer(pixmap.samples, dtype=np.uint8)
+            image = image.reshape(pixmap.height, pixmap.width, pixmap.n)
             image = cv.cvtColor(image, cv.COLOR_RGB2BGR)
 
-        imgs.append(image)
+            images.append(image)
 
-    doc.close()
+    return images
 
-    return imgs
 
 def grayscaleImage(image: np.ndarray) -> np.ndarray:
-    return cv.cvtColor(image,cv.COLOR_BGR2GRAY)
+    """Converte uma imagem BGR para tons de cinza."""
 
-def alignToTemplate(image: np.ndarray,template: np.ndarray) -> np.ndarray:
-    gray_image = grayscaleImage(image)
+    return cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+
+
+def prepareTemplate(template: np.ndarray) -> dict:
+    """Calcula os pontos de referência do formulário vazio para reutilização."""
+
     gray_template = grayscaleImage(template)
+    orb = cv.ORB_create(nfeatures=5000)
 
-    orb = cv.ORB_create( nfeatures=5000)
+    keypoints, descriptors = orb.detectAndCompute(gray_template, None)
 
-    keypoints_image, descriptors_image = orb.detectAndCompute(gray_image,None)
+    if descriptors is None or len(keypoints) < 4:
+        raise RuntimeError("Não foi possível identificar pontos suficientes na página do formulário vazio.")
 
-    keypoints_template, descriptors_template = orb.detectAndCompute(gray_template,None)
+    return {
+        "keypoints": keypoints,
+        "descriptors": descriptors,
+        "shape": template.shape[:2]
+    }
+
+
+def alignToTemplate(image: np.ndarray, template_data: dict) -> np.ndarray:
+    """Alinha uma página preenchida utilizando os dados do formulário vazio."""
+
+    gray_image = grayscaleImage(image)
+    orb = cv.ORB_create(nfeatures=5000)
+
+    keypoints_image, descriptors_image = orb.detectAndCompute(gray_image, None)
+
+    if descriptors_image is None or len(keypoints_image) < 4:
+        raise RuntimeError("Não foi possível identificar pontos suficientes na página preenchida.")
 
     matcher = cv.BFMatcher(cv.NORM_HAMMING)
-
-    matches = matcher.knnMatch(descriptors_image,descriptors_template,k=2)
+    matches = matcher.knnMatch(descriptors_image, template_data["descriptors"], k=2)
 
     good_matches = []
 
-    for m, n in matches:
+    for pair in matches:
+        if len(pair) < 2:
+            continue
+
+        m, n = pair
+
         if m.distance < 0.75 * n.distance:
             good_matches.append(m)
 
@@ -60,53 +76,29 @@ def alignToTemplate(image: np.ndarray,template: np.ndarray) -> np.ndarray:
         raise RuntimeError("Não foram encontrados pontos suficientes para alinhar o formulário.")
 
     image_points = np.float32([keypoints_image[match.queryIdx].pt for match in good_matches])
+    template_points = np.float32([template_data["keypoints"][match.trainIdx].pt for match in good_matches])
 
-    template_points = np.float32([keypoints_template[match.trainIdx].pt for match in good_matches])
-
-    homography, mask = cv.findHomography(
-        image_points,
-        template_points,
-        cv.RANSAC,
-        5.0
-    )
+    homography, _ = cv.findHomography(image_points, template_points, cv.RANSAC, 5.0)
 
     if homography is None:
         raise RuntimeError("Não foi possível calcular a homografia.")
 
-    height, width = template.shape[:2]
+    height, width = template_data["shape"]
 
-    aligned = cv.warpPerspective(image,homography,(width, height),borderValue=(255, 255, 255))
+    return cv.warpPerspective(image, homography, (width, height), borderValue=(255, 255, 255))
 
-    return aligned
 
-def saveProcessedImage(
-    image: np.ndarray,
-    output_path: str
-) -> None:
+def saveProcessedImage(image: np.ndarray, output_path: str | Path) -> None:
+    """Salva uma imagem processada no caminho informado."""
 
     output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
-    output.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    extension = output.suffix
-
-    success, encoded = cv.imencode(
-        extension,
-        image
-    )
+    success, encoded = cv.imencode(output.suffix, image)
 
     if not success:
-        raise RuntimeError(
-            f"Não foi possível codificar a imagem: {output.name}"
-        )
+        raise RuntimeError(f"Não foi possível codificar a imagem: {output.name}")
 
-    encoded.tofile(
-        str(output)
-    )
+    encoded.tofile(str(output))
 
-    print(
-        f"Imagem salva em: {output.resolve()}"
-    )
+    print(f"Imagem salva em: {output.resolve()}")

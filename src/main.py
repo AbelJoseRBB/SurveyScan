@@ -9,11 +9,7 @@ from config import (
     EXCEL_FILE
 )
 
-from image_processor import (
-    pdfToImage,
-    alignToTemplate,
-    grayscaleImage
-)
+from image_processor import pdfToImage, alignToTemplate, grayscaleImage, prepareTemplate
 
 from readers.answer_reader import readForm
 
@@ -45,6 +41,8 @@ def main():
         str(INPUT_DIR / "FormsVazio.pdf")
     )
 
+    template_data = [prepareTemplate(page) for page in template_pages]
+
     form_pages = pdfToImage(
         str(INPUT_DIR / "FormsFull.pdf")
     )
@@ -53,15 +51,8 @@ def main():
     processed_pages = {}
 
     for i, form_page in enumerate(form_pages):
-
-        aligned_page = alignToTemplate(
-            form_page,
-            template_pages[i]
-        )
-
-        processed_pages[i + 1] = grayscaleImage(
-            aligned_page
-        )
+        aligned_page = alignToTemplate(form_page, template_data[i])
+        processed_pages[i + 1] = grayscaleImage(aligned_page)
 
     # 4. Respostas objetivas
     objective_answers = readForm(

@@ -1,7 +1,9 @@
 import cv2 as cv
 import numpy as np
+import torch
 from PIL import Image
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+from readers.answer_reader import cropRegion
 
 MODEL_NAME = "microsoft/trocr-base-handwritten"
 
@@ -13,10 +15,7 @@ def loadHandwritingModel():
     return processor, model
 
 def readHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int], processor, model)->str:
-    x1, y1, x2, y2 = coordinates
-    height = image.shape[0]
-
-    cropped = image[y1:y2, x1:x2]
+    cropped = cropRegion(image, *coordinates)
 
     if cropped.size == 0:
         return "ERRO NO RECORTE"
@@ -38,7 +37,8 @@ def readHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int], p
 
     pixel_values = processor(images = pil_image, return_tensors = "pt").pixel_values
 
-    generate_ids = model.generate(pixel_values, max_new_tokens = 32)
+    with torch.inference_mode():
+        generate_ids = model.genarate(pixel_values, max_new_tokens = 32)
 
     text = processor.batch_decode(generate_ids, skip_special_tokens = True)[0]
 

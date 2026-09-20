@@ -23,7 +23,7 @@ def showCoordinates(
 
 
 image = cv.imread(
-    "output/aligned_page1.png"
+    "output/aligned_page2.png"
 )
 
 if image is None:

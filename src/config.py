@@ -5,6 +5,7 @@ BASE_DIR = Path(__file__).parent.parent
 INPUT_DIR = BASE_DIR / "formularios"
 OUTPUT_DIR = BASE_DIR / "output"
 EXCEL_FILE = OUTPUT_DIR / "resultado.xlsx"
+ANO_COLETA = 2026
 
 QUESTION_COORDINATES = {
 
@@ -137,15 +138,18 @@ QUESTION_COORDINATES = {
 
 TEXT_FIELDS = {
     1: {
-        "questionario_numero": None,
+        "questionario_numero": (846, 448, 1116, 504),
         "idade": (776, 674, 1282, 742),
         "religiao_outra": None,
         "ocupacao": None,
-        "renda_valor": None,
-        "quantidade_filhos": None,
+        "renda_valor": (1224, 1344, 1842, 1394),
+        "quantidade_filhos": (1150, 1408, 1496, 1458),
     },
 
     2: {
-        "data_coleta": None
+        "data_coleta":{
+            "dia": (670, 1228, 756, 1284),
+            "mes": (792, 1228, 900, 1282)
+        }
     }
 }

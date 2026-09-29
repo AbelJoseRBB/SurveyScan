@@ -5,7 +5,7 @@ openpyxl
 PyMuPDF
 scikit-learn
 joblib
-transformers == 4.49.0
+transformers==4.49.0
 torch
 Pillow
 sentencepiece

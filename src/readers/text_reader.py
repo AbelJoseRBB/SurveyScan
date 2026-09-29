@@ -5,6 +5,21 @@ import cv2 as cv
 import numpy as np
 import joblib
 
+def saveReviewImage(image: np.ndarray, coordinates: tuple[int, int, int, int], form_id: str, field_name: str, output_dir: Path)->str:
+    cropped = cropRegion(image, *coordinates)
+    if cropped.size == 0:
+        return ""
+    
+    output_dir.mkdir(parents=True, exist_ok= True)
+    image_path = output_dir/ f"questionario_{form_id}_{field_name}.png"
+    success, encoded = cv.imencode(".png", cropped)
+
+    if not success:
+        return ""
+    
+    encoded.tofile(str(image_path))
+    return str(image_path)
+
 def normalizeDigit(digit: np.ndarray, canvas_size: int = 28, digit_size: int = 20) -> np.ndarray:
 
     if len(digit.shape) == 3:
@@ -110,35 +125,41 @@ def readAge(image: np.ndarray, coordinates: tuple[int, int, int, int], svm_model
 
     return str(age), needs_review
 
-def numericResult(value: str, needs_review: bool) -> dict:
-    return {"valor": value, "revisar": needs_review}
+def numericResult(value: str, needs_review: bool, image: str = "") -> dict:
+    return {"valor": value, "revisar": needs_review, "imagem": image}
 
-def readNumericFields(image: np.ndarray, text_fields: dict, objective_answers: dict, svm_model, knn_model) -> dict:
-
+def readNumericFields(image: np.ndarray, text_fields: dict, objective_answers: dict, svm_model, knn_model, form_id: str, output_dir: Path) -> dict:
     results = {}
 
-    # Numero Questionario 
+    # Numero Questionario
     number, needs_review = readNumber(image, text_fields["questionario_numero"], svm_model, knn_model)
-    results["questionario_numero"] = numericResult(number, needs_review or number == "EM BRANCO")
+    needs_review = needs_review or number == "EM BRANCO"
+    image_path = saveReviewImage(image, text_fields["questionario_numero"], form_id, "questionario_numero", output_dir) if needs_review else ""
+    results["questionario_numero"] = numericResult(number, needs_review, image_path)
 
     # Idade
     age, needs_review = readAge(image, text_fields["idade"], svm_model, knn_model)
-    results["idade"] = numericResult(age, needs_review or age == "EM BRANCO")
+    needs_review = needs_review or age == "EM BRANCO"
+    image_path = saveReviewImage(image, text_fields["idade"], form_id, "idade", output_dir) if needs_review else ""
+    results["idade"] = numericResult(age, needs_review, image_path)
 
     # Quantidade de filhos
     if objective_answers["tem_filhos"] == "Sim":
         quant, needs_review = readNumber(image, text_fields["quantidade_filhos"], svm_model, knn_model)
         needs_review = needs_review or quant == "EM BRANCO" or (quant.isdigit() and int(quant) == 0)
-        results["quantidade_filhos"] = numericResult(quant, needs_review)
+        image_path = saveReviewImage(image, text_fields["quantidade_filhos"], form_id, "quantidade_filhos", output_dir) if needs_review else ""
+        results["quantidade_filhos"] = numericResult(quant, needs_review, image_path)
     elif objective_answers["tem_filhos"] == "Não":
         results["quantidade_filhos"] = numericResult("0", False)
     else:
-        results["quantidade_filhos"] = numericResult("VERIFCAR", True)
-    
-    # Renda Mensal 
+        results["quantidade_filhos"] = numericResult("VERIFICAR", True)
+
+    # Renda Mensal
     if objective_answers["renda_mensal"] == "Sim":
         valor, needs_review = readIncome(image, text_fields["renda_valor"], svm_model, knn_model)
-        results["renda_valor"]= numericResult(valor, needs_review or valor == "EM BRANCO")
+        needs_review = needs_review or valor == "EM BRANCO"
+        image_path = saveReviewImage(image, text_fields["renda_valor"], form_id, "renda_valor", output_dir) if needs_review else ""
+        results["renda_valor"] = numericResult(valor, needs_review, image_path)
     elif objective_answers["renda_mensal"] == "Não":
         results["renda_valor"] = numericResult("Não", False)
     else:

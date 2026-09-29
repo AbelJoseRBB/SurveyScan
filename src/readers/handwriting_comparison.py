@@ -22,16 +22,23 @@ def compareHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int]
 
     # Sugestão rapid fuzz
     suggestions = None
+    accepted_suggestion = None
 
-    if not agreement and field_name in VOCABULARIES:
+    if field_name in VOCABULARIES:  
         vocabulary = VOCABULARIES[field_name]
+
+        trocr_suggestion = suggestText(trocr_text, vocabulary)
+        easyocr_suggestion = suggestText(easyocr_text, vocabulary)
+
         suggestions = {
-            "trocr": suggestText(trocr_text, vocabulary),
-            "easyocr": suggestText(easyocr_text, vocabulary)
+            "trocr": trocr_suggestion,
+            "easyocr": easyocr_suggestion
         }
 
+        if trocr_suggestion["similaridade"] >= 85:
+            accepted_suggestion = trocr_suggestion["sugestao"]
+
     # Salvar a imagem original do campo
-    
     cropped = cropRegion(image, *coordinates)
     output_dir.mkdir(parents=True, exist_ok=True)
     image_path = output_dir / f"questionario_{form_id}_{field_name}.png"
@@ -45,12 +52,12 @@ def compareHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int]
             saved_image = str(image_path)
 
     return {
-        "valor": trocr_text if agreement else "VERIFICAR",
+        "valor": trocr_text if agreement else accepted_suggestion if accepted_suggestion else "VERIFICAR",
         "trocr": trocr_text,
         "easyocr": easyocr_text,
         "concordancia": agreement,
         "sugestoes": suggestions,
-        "revisar": not agreement or not bool(saved_image),
+        "revisar": not agreement and accepted_suggestion is None,
         "imagem": saved_image 
     }
 

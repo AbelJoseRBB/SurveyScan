@@ -1,6 +1,7 @@
 from pathlib import Path
 import pandas as pd
 from openpyxl.styles import PatternFill
+from openpyxl.drawing.image import Image as ExcelImage
 
 COLUMN_NAMES = {
     "identificador_processamento": "ID",
@@ -33,8 +34,30 @@ COLUMN_NAMES = {
 def columnName(field: str) -> str:
     return COLUMN_NAMES.get(field, field)
 
+def insertReviewImages(worksheet, review_rows: list[dict]) -> None:
+    image_column = 4
+    worksheet.column_dimensions["D"].width = 35
 
-def flattenQuestionnaire(questionnaire: dict) -> dict:
+    for row_number, review in enumerate(review_rows, start=2):
+        image_path = review.get("imagem")
+
+        if not image_path or not Path(image_path).exists():
+            continue
+
+        image = ExcelImage(image_path)
+
+        max_width = 250
+        max_height = 80
+        scale = min(max_width / image.width, max_height / image.height)
+
+        image.width *= scale
+        image.height *= scale
+
+        worksheet.row_dimensions[row_number].height = image.height * 0.75
+        worksheet.add_image(image, f"D{row_number}")
+        worksheet.cell(row=row_number, column=image_column).value = ""
+
+def flattenQuestionnaire(questionnaire: dict, manual_corrections: dict) -> dict:
     objective = questionnaire["objetivas"]
     numeric = questionnaire["numericas"]
     handwritten = questionnaire["manuscritas"]
@@ -83,15 +106,45 @@ def flattenQuestionnaire(questionnaire: dict) -> dict:
 
     row["data_coleta"] = questionnaire["data_coleta"]["valor"]
 
+    form_id = str(questionnaire["identificador_processamento"])
+    for(correction_id, field), correction in manual_corrections.items():
+        if correction_id != form_id:
+            continue
+        
+        if field in row:
+            row[field] = correction
+
     return {columnName(field): value for field, value in row.items()}
 
+def loadManualCorrections(output_path: Path)-> dict:
+    if not output_path.exists():
+        return {}
+    try:
+        review_df = pd.read_excel(output_path, sheet_name="Revisao")
+    except (FileNotFoundError, ValueError):
+        return {}
+    if "correcao_manual" not in review_df.columns:
+        return {}
+
+    corrections = {}
+
+    for _, row in review_df.iterrows():
+        correction = row["correcao_manual"]
+
+        if pd.isna(correction) or not str(correction).strip():
+            continue
+
+        key = (str(row["questionario"]), str(row["campo"]))
+        corrections[key] = str(correction).strip()
+    
+    return corrections
 
 def exportQuestionnaires(questionnaires: list[dict], output_path: Path) -> None:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    questionnaire_rows = [flattenQuestionnaire(questionnaire) for questionnaire in questionnaires]
-    review_rows = [row for questionnaire in questionnaires for row in flattenReview(questionnaire)]
+    manual_corrections = loadManualCorrections(output_path)
+    questionnaire_rows = [flattenQuestionnaire(questionnaire, manual_corrections) for questionnaire in questionnaires]
+    review_rows = [row for questionnaire in questionnaires for row in flattenReview(questionnaire, manual_corrections)]
 
     questionnaire_df = pd.DataFrame(questionnaire_rows)
 
@@ -99,11 +152,8 @@ def exportQuestionnaires(questionnaires: list[dict], output_path: Path) -> None:
         "questionario", 
         "campo", 
         "valor_lido", 
-        "trocr", 
-        "easyocr", 
-        "sugestao_trocr", 
-        "sugestao_easyocr", 
-        "imagem"
+        "imagem",
+        "correcao_manual"
     ]
     review_df = pd.DataFrame(review_rows, columns=review_columns)
 
@@ -111,16 +161,20 @@ def exportQuestionnaires(questionnaires: list[dict], output_path: Path) -> None:
         questionnaire_df.to_excel(writer, index=False, sheet_name="Questionarios")
         review_df.to_excel(writer, index=False, sheet_name="Revisao")
 
+        review_sheet = writer.sheets["Revisao"]
+        insertReviewImages(review_sheet, review_rows)
         highlightReviewCells(writer.sheets["Questionarios"], questionnaires)
 
     print(f"\nPlanilha salva em: {output_path}")
 
 
-def flattenReview(questionnaire: dict) -> list[dict]:
+def flattenReview(questionnaire: dict, manual_corrections: dict) -> list[dict]:
     rows = []
     form_id = questionnaire["identificador_processamento"]
 
     def addReview(field: str, value: str, trocr: str = "", easyocr: str = "", suggestion_trocr: str = "", suggestion_easyocr: str = "", image: str = "") -> None:
+        key = (str(questionnaire["identificador_processamento"]), field)
+        correction = manual_corrections.get(key, "")
         rows.append({
             "questionario": form_id,
             "campo": field,
@@ -129,7 +183,8 @@ def flattenReview(questionnaire: dict) -> list[dict]:
             "easyocr": easyocr,
             "sugestao_trocr": suggestion_trocr,
             "sugestao_easyocr": suggestion_easyocr,
-            "imagem": image
+            "imagem": image,
+            "correcao_manual": correction
         })
 
     for field, value in questionnaire["objetivas"].items():
@@ -142,7 +197,7 @@ def flattenReview(questionnaire: dict) -> list[dict]:
 
     for field, result in questionnaire["numericas"].items():
         if result["revisar"]:
-            addReview(field, result["valor"])
+            addReview(field, result["valor"], image=result.get("imagem", ""))
 
     date_result = questionnaire["data_coleta"]
 
@@ -157,17 +212,20 @@ def flattenReview(questionnaire: dict) -> list[dict]:
         trocr_suggestion = (suggestions.get("trocr") or {}).get("sugestao") or ""
         easyocr_suggestion = (suggestions.get("easyocr") or {}).get("sugestao") or ""
 
-        addReview(field, result["valor"], result.get("trocr", ""), result.get("easyocr", ""), trocr_suggestion, easyocr_suggestion, result.get("imagem", ""))
+        value_read = result.get("trocr", "").strip()
+
+        if not value_read:
+            value_read = result.get("easyocr", "").strip()
+
+        if not value_read:
+            value_read = result.get("valor", "VERIFICAR")
+
+        addReview(field, value_read, result.get("trocr", ""), result.get("easyocr", ""), trocr_suggestion, easyocr_suggestion, result.get("imagem", ""))
 
     return rows
 
 
 def getHandwrittenValue(result: dict) -> str:
-    """
-    Retorna o valor a ser exibido na aba principal.
-    Se houver revisão, tenta utilizar uma sugestão do RapidFuzz.
-    """
-
     if not result["revisar"]:
         return result["valor"]
 
@@ -175,10 +233,18 @@ def getHandwrittenValue(result: dict) -> str:
     trocr_suggestion = (suggestions.get("trocr") or {}).get("sugestao")
     easyocr_suggestion = (suggestions.get("easyocr") or {}).get("sugestao")
 
-    # Usa a sugestão apenas quando os dois OCRs
-    # apontam para a mesma palavra do vocabulário.
     if trocr_suggestion and trocr_suggestion == easyocr_suggestion:
         return trocr_suggestion
+
+    trocr_text = result.get("trocr", "").strip()
+    easyocr_text = result.get("easyocr", "").strip()
+
+    if trocr_text and trocr_text != "ERRO NO RECORTE":
+        return trocr_text
+
+    if easyocr_text and easyocr_text != "ERRO NO RECORTE":
+        return easyocr_text
+
     return "VERIFICAR"
 
 

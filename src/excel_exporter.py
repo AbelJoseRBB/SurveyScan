@@ -4,7 +4,6 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as ExcelImage
 
-
 COLUMN_NAMES = {
     "identificador_processamento": "ID",
     "questionario_numero": "Nº do questionário",
@@ -36,28 +35,56 @@ COLUMN_NAMES = {
 def columnName(field: str) -> str:
     return COLUMN_NAMES.get(field, field)
 
-def insertReviewImages(worksheet, review_rows: list[dict]) -> None:
-    image_column = 4
-    worksheet.column_dimensions["D"].width = 35
 
-    for row_number, review in enumerate(review_rows, start=2):
-        image_path = review.get("imagem")
+def loadManualCorrections(output_path: Path) -> dict:
+    if not output_path.exists():
+        return {}
 
-        if not image_path or not Path(image_path).exists():
+    corrections = {}
+
+    for sheet_name in ("Correcoes", "Revisao"):
+        try:
+            df = pd.read_excel(output_path, sheet_name=sheet_name)
+        except (FileNotFoundError, ValueError):
             continue
 
-        image = ExcelImage(image_path)
+        if not {"ID", "Campo", "Correção"}.issubset(df.columns):
+            continue
 
-        max_width = 250
-        max_height = 80
-        scale = min(max_width / image.width, max_height / image.height)
+        for _, row in df.iterrows():
+            correction = row["Correção"]
 
-        image.width *= scale
-        image.height *= scale
+            if pd.isna(correction) or not str(correction).strip():
+                continue
 
-        worksheet.row_dimensions[row_number].height = image.height * 0.75
-        worksheet.add_image(image, f"D{row_number}")
-        worksheet.cell(row=row_number, column=image_column).value = ""
+            key = (str(row["ID"]), str(row["Campo"]))
+            corrections[key] = str(correction).strip()
+
+    return corrections
+
+
+def getHandwrittenValue(result: dict) -> str:
+    if not result["revisar"]:
+        return result["valor"]
+
+    suggestions = result.get("sugestoes") or {}
+    trocr_suggestion = (suggestions.get("trocr") or {}).get("sugestao")
+    easyocr_suggestion = (suggestions.get("easyocr") or {}).get("sugestao")
+
+    if trocr_suggestion and trocr_suggestion == easyocr_suggestion:
+        return trocr_suggestion
+
+    trocr_text = result.get("trocr", "").strip()
+    easyocr_text = result.get("easyocr", "").strip()
+
+    if trocr_text and trocr_text != "ERRO NO RECORTE":
+        return trocr_text
+
+    if easyocr_text and easyocr_text != "ERRO NO RECORTE":
+        return easyocr_text
+
+    return "VERIFICAR"
+
 
 def flattenQuestionnaire(questionnaire: dict, manual_corrections: dict) -> dict:
     objective = questionnaire["objetivas"]
@@ -116,43 +143,87 @@ def flattenQuestionnaire(questionnaire: dict, manual_corrections: dict) -> dict:
         if isinstance(value, dict):
             for subfield, subvalue in value.items():
                 row[f"{field}_{subfield}"] = subvalue
-
+                
+    row["q12_ocitocina_sem_explicacao"] = objective["q12_ocitocina_sem_explicacao"]
     row["q13_autoavaliacao"] = objective["q13_autoavaliacao"]
+
+    correction_fields = {
+        "religiao_outra": "religiao",
+        "renda_valor": "renda_mensal",
+        "quantidade_filhos": "tem_filhos"
+    }
 
     for (correction_id, field), correction in manual_corrections.items():
         if correction_id != form_id:
             continue
 
-        if field in row:
-            row[field] = correction
+        target_field = correction_fields.get(field, field)
+
+        if target_field in row:
+            row[target_field] = correction
 
     return {columnName(field): value for field, value in row.items()}
 
-def loadManualCorrections(output_path: Path) -> dict:
-    if not output_path.exists():
-        return {}
 
-    corrections = {}
+def flattenReview(questionnaire: dict, manual_corrections: dict) -> list[dict]:
+    rows = []
+    form_id = questionnaire["identificador_processamento"]
 
-    for sheet_name in ("Correcoes", "Revisao"):
-        try:
-            df = pd.read_excel(output_path, sheet_name=sheet_name)
-        except (FileNotFoundError, ValueError):
+    def addReview(field: str, value: str, trocr: str = "", easyocr: str = "", suggestion_trocr: str = "", suggestion_easyocr: str = "", image: str = "") -> None:
+        key = (str(questionnaire["identificador_processamento"]), field)
+        correction = manual_corrections.get(key, "")
+
+        if correction:
+            return
+        rows.append({
+            "questionario": form_id,
+            "campo": field,
+            "valor_lido": value,
+            "trocr": trocr,
+            "easyocr": easyocr,
+            "sugestao_trocr": suggestion_trocr,
+            "sugestao_easyocr": suggestion_easyocr,
+            "imagem": image,
+            "correcao_manual": correction
+        })
+
+    for field, value in questionnaire["objetivas"].items():
+        if isinstance(value, dict):
+            for subfield, subvalue in value.items():
+                if subvalue == "AMBÍGUA":
+                    addReview(f"{field}_{subfield}", subvalue)
+        elif value == "AMBÍGUA":
+            addReview(field, value)
+
+    for field, result in questionnaire["numericas"].items():
+        if result["revisar"]:
+            addReview(field, result["valor"], image=result.get("imagem", ""))
+
+    date_result = questionnaire["data_coleta"]
+
+    if date_result["revisar"]:
+        addReview("data_coleta", date_result["valor"])
+
+    for field, result in questionnaire["manuscritas"].items():
+        if not result["revisar"]:
             continue
 
-        if not {"ID", "Campo", "Correção"}.issubset(df.columns):
-            continue
+        suggestions = result.get("sugestoes") or {}
+        trocr_suggestion = (suggestions.get("trocr") or {}).get("sugestao") or ""
+        easyocr_suggestion = (suggestions.get("easyocr") or {}).get("sugestao") or ""
 
-        for _, row in df.iterrows():
-            correction = row["Correção"]
+        value_read = result.get("trocr", "").strip()
 
-            if pd.isna(correction) or not str(correction).strip():
-                continue
+        if not value_read:
+            value_read = result.get("easyocr", "").strip()
 
-            key = (str(row["ID"]), str(row["Campo"]))
-            corrections[key] = str(correction).strip()
+        if not value_read:
+            value_read = result.get("valor", "VERIFICAR")
 
-    return corrections
+        addReview(field, value_read, result.get("trocr", ""), result.get("easyocr", ""), trocr_suggestion, easyocr_suggestion, result.get("imagem", ""))
+
+    return rows
+
 
 def formatWorksheet(worksheet) -> None:
     header_fill = PatternFill(fill_type="solid", fgColor="1F4E78")
@@ -164,7 +235,7 @@ def formatWorksheet(worksheet) -> None:
     worksheet.freeze_panes = "A2"
 
     worksheet.auto_filter.ref = worksheet.dimensions
-    worksheet.sheet_view.showGridLines = False
+    worksheet.sheet_view.showGridLines =False
 
     for cell in worksheet[1]:
         cell.fill = header_fill
@@ -242,7 +313,94 @@ def formatWorksheet(worksheet) -> None:
             worksheet.column_dimensions[get_column_letter(id_column)].width = 15
 
     for column in range(worksheet.max_column + 1, 16385):
-        worksheet.column_dimensions[get_column_letter(column)].hidden = True
+        worksheet.column_dimensions[get_column_letter(column)].hidden =True
+
+
+def insertReviewImages(worksheet, review_rows: list[dict]) -> None:
+    image_column = 4
+    worksheet.column_dimensions["D"].width = 35
+
+    for row_number, review in enumerate(review_rows, start=2):
+        image_path = review.get("imagem")
+
+        if not image_path or not Path(image_path).exists():
+            continue
+
+        image = ExcelImage(image_path)
+
+        max_width = 250
+        max_height = 80
+        scale = min(max_width / image.width, max_height / image.height)
+
+        image.width *= scale
+        image.height *= scale
+
+        worksheet.row_dimensions[row_number].height = image.height * 0.75
+        worksheet.add_image(image, f"D{row_number}")
+        worksheet.cell(row=row_number, column=image_column).value = ""
+
+
+def highlightReviewCells(worksheet, questionnaires: list[dict], manual_corrections: dict) -> None:
+    yellow_fill = PatternFill(fill_type="solid", fgColor="FFF2CC")
+    red_fill = PatternFill(fill_type="solid", fgColor="F4CCCC")
+
+    columns = {cell.value: cell.column for cell in worksheet[1]}
+
+    def highlight(row_number: int, field: str) -> None:
+        column = columns.get(columnName(field))
+
+        if column is None:
+            return
+
+        cell = worksheet.cell(row=row_number, column=column)
+        cell.fill = red_fill if cell.value in ("VERIFICAR", "AMBÍGUA", "EM BRANCO") else yellow_fill
+
+    for row_number, questionnaire in enumerate(questionnaires, start=2):
+        form_id = str(questionnaire["identificador_processamento"])
+        def isCorrected(field: str) -> bool:
+            return (form_id, field) in manual_corrections
+        objective = questionnaire["objetivas"]
+        numeric = questionnaire["numericas"]
+        handwritten = questionnaire["manuscritas"]
+
+        # Questões objetivas ambíguas
+        for field, value in objective.items():
+            if isinstance(value, dict):
+                for subfield, subvalue in value.items():
+                    if subvalue == "AMBÍGUA":
+                        highlight(row_number, f"{field}_{subfield}")
+            elif value == "AMBÍGUA" and field not in {"religiao", "trabalha", "renda_mensal", "tem_filhos"}:
+                highlight(row_number, field)
+
+        # Campos numéricos independentes
+        for field in ("questionario_numero", "idade"):
+            if numeric[field]["revisar"] and not isCorrected(field):
+                highlight(row_number, field)
+
+        # Religião e ocupação
+        if objective["religiao"] == "Outra":
+            if handwritten["religiao_outra"]["revisar"] and not isCorrected("religiao_outra"):
+                highlight(row_number, "religiao")
+        elif objective["religiao"] == "AMBÍGUA":
+            highlight(row_number, "religiao")
+
+        if objective["trabalha"] == "Sim":
+            if handwritten["ocupacao"]["revisar"] and not isCorrected("ocupacao"):
+                highlight(row_number, "ocupacao")
+        elif objective["trabalha"] not in {"Sim", "Não"}:
+            highlight(row_number, "ocupacao")
+
+        # Renda e quantidade de filhos
+        if numeric["renda_valor"]["revisar"] and not isCorrected("renda_valor"):
+            highlight(row_number, "renda_mensal")
+
+        if numeric["quantidade_filhos"]["revisar"] and not isCorrected("quantidade_filhos"):
+            highlight(row_number, "tem_filhos")
+
+        # Data
+        if questionnaire["data_coleta"]["revisar"] and not isCorrected("data_coleta"):
+            highlight(row_number, "data_coleta")
+
 
 def exportQuestionnaires(questionnaires: list[dict], output_path: Path) -> None:
     output_path = Path(output_path)
@@ -313,148 +471,3 @@ def exportQuestionnaires(questionnaires: list[dict], output_path: Path) -> None:
         highlightReviewCells(writer.sheets["Questionarios"], questionnaires, manual_corrections)
 
     print(f"\nPlanilha salva em: {output_path}")
-
-
-def flattenReview(questionnaire: dict, manual_corrections: dict) -> list[dict]:
-    rows = []
-    form_id = questionnaire["identificador_processamento"]
-
-    def addReview(field: str, value: str, trocr: str = "", easyocr: str = "", suggestion_trocr: str = "", suggestion_easyocr: str = "", image: str = "") -> None:
-        key = (str(questionnaire["identificador_processamento"]), field)
-        correction = manual_corrections.get(key, "")
-
-        if correction:
-            return
-        rows.append({
-            "questionario": form_id,
-            "campo": field,
-            "valor_lido": value,
-            "trocr": trocr,
-            "easyocr": easyocr,
-            "sugestao_trocr": suggestion_trocr,
-            "sugestao_easyocr": suggestion_easyocr,
-            "imagem": image,
-            "correcao_manual": correction
-        })
-
-    for field, value in questionnaire["objetivas"].items():
-        if isinstance(value, dict):
-            for subfield, subvalue in value.items():
-                if subvalue == "AMBÍGUA":
-                    addReview(f"{field}_{subfield}", subvalue)
-        elif value == "AMBÍGUA":
-            addReview(field, value)
-
-    for field, result in questionnaire["numericas"].items():
-        if result["revisar"]:
-            addReview(field, result["valor"], image=result.get("imagem", ""))
-
-    date_result = questionnaire["data_coleta"]
-
-    if date_result["revisar"]:
-        addReview("data_coleta", date_result["valor"])
-
-    for field, result in questionnaire["manuscritas"].items():
-        if not result["revisar"]:
-            continue
-
-        suggestions = result.get("sugestoes") or {}
-        trocr_suggestion = (suggestions.get("trocr") or {}).get("sugestao") or ""
-        easyocr_suggestion = (suggestions.get("easyocr") or {}).get("sugestao") or ""
-
-        value_read = result.get("trocr", "").strip()
-
-        if not value_read:
-            value_read = result.get("easyocr", "").strip()
-
-        if not value_read:
-            value_read = result.get("valor", "VERIFICAR")
-
-        addReview(field, value_read, result.get("trocr", ""), result.get("easyocr", ""), trocr_suggestion, easyocr_suggestion, result.get("imagem", ""))
-
-    return rows
-
-
-def getHandwrittenValue(result: dict) -> str:
-    if not result["revisar"]:
-        return result["valor"]
-
-    suggestions = result.get("sugestoes") or {}
-    trocr_suggestion = (suggestions.get("trocr") or {}).get("sugestao")
-    easyocr_suggestion = (suggestions.get("easyocr") or {}).get("sugestao")
-
-    if trocr_suggestion and trocr_suggestion == easyocr_suggestion:
-        return trocr_suggestion
-
-    trocr_text = result.get("trocr", "").strip()
-    easyocr_text = result.get("easyocr", "").strip()
-
-    if trocr_text and trocr_text != "ERRO NO RECORTE":
-        return trocr_text
-
-    if easyocr_text and easyocr_text != "ERRO NO RECORTE":
-        return easyocr_text
-
-    return "VERIFICAR"
-
-
-def highlightReviewCells(worksheet, questionnaires: list[dict], manual_corrections: dict) -> None:
-    yellow_fill = PatternFill(fill_type="solid", fgColor="FFF2CC")
-    red_fill = PatternFill(fill_type="solid", fgColor="F4CCCC")
-
-    columns = {cell.value: cell.column for cell in worksheet[1]}
-
-    def highlight(row_number: int, field: str) -> None:
-        column = columns.get(columnName(field))
-
-        if column is None:
-            return
-
-        cell = worksheet.cell(row=row_number, column=column)
-        cell.fill = red_fill if cell.value in ("VERIFICAR", "AMBÍGUA", "EM BRANCO") else yellow_fill
-
-    for row_number, questionnaire in enumerate(questionnaires, start=2):
-        form_id = str(questionnaire["identificador_processamento"])
-        def isCorrected(field: str) -> bool:
-            return (form_id, field) in manual_corrections
-        objective = questionnaire["objetivas"]
-        numeric = questionnaire["numericas"]
-        handwritten = questionnaire["manuscritas"]
-
-        # Questões objetivas ambíguas
-        for field, value in objective.items():
-            if isinstance(value, dict):
-                for subfield, subvalue in value.items():
-                    if subvalue == "AMBÍGUA":
-                        highlight(row_number, f"{field}_{subfield}")
-            elif value == "AMBÍGUA" and field not in {"religiao", "trabalha", "renda_mensal", "tem_filhos"}:
-                highlight(row_number, field)
-
-        # Campos numéricos independentes
-        for field in ("questionario_numero", "idade"):
-            if numeric[field]["revisar"] and not isCorrected(field):
-                highlight(row_number, field)
-
-        # Religião e ocupação
-        if objective["religiao"] == "Outra":
-            if handwritten["religiao_outra"]["revisar"] and not isCorrected("religiao_outra"):
-                highlight(row_number, "religiao")
-        elif objective["religiao"] == "AMBÍGUA":
-            highlight(row_number, "religiao")
-
-        if objective["trabalha"] == "Sim":
-            if handwritten["ocupacao"]["revisar"] and not isCorrected("ocupacao"):
-                highlight(row_number, "ocupacao")
-        elif objective["trabalha"] not in {"Sim", "Não"}:
-            highlight(row_number, "ocupacao")
-
-        # Renda e quantidade de filhos
-        if numeric["renda_valor"]["revisar"] and not isCorrected("renda_valor"):
-            highlight(row_number, "renda_mensal")
-
-        if numeric["quantidade_filhos"]["revisar"] and not isCorrected("quantidade_filhos"):
-            highlight(row_number, "tem_filhos")
-
-        # Data
-        if questionnaire["data_coleta"]["revisar"] and not isCorrected("data_coleta"):
-            highlight(row_number, "data_coleta")

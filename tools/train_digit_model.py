@@ -60,7 +60,7 @@ def main():
 
     print(f"Acuracia no MNIST: {accuracy:.2%}")
 
-    MODEL_DIR.mkdir(parents= True, exist_ok=True)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
 
     print(f"Modelo Salvo em {MODEL_PATH}")

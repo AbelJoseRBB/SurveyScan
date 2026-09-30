@@ -13,43 +13,38 @@ VOCABULARIES = {
 
 
 def compareHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int], field_name: str, form_id: str, processor, trocr_model, easyocr_reader, output_dir: Path) -> dict:
-    # Reconhecimento com os dois modelos
     trocr_text = readHandwriting(image, coordinates, processor, trocr_model)
     easyocr_text = readHandwritingEasyOCR(image, coordinates, easyocr_reader)
 
-    # Comparação das transições 
-    agreement =  bool(trocr_text) and bool(easyocr_text) and trocr_text.casefold() == easyocr_text.casefold()
-
-    # Sugestão rapid fuzz
+    agreement = bool(trocr_text) and bool(easyocr_text) and trocr_text.casefold() == easyocr_text.casefold()
     suggestions = None
     accepted_suggestion = None
 
-    if field_name in VOCABULARIES:  
+    if field_name in VOCABULARIES:
         vocabulary = VOCABULARIES[field_name]
-
         trocr_suggestion = suggestText(trocr_text, vocabulary)
         easyocr_suggestion = suggestText(easyocr_text, vocabulary)
-
-        suggestions = {
-            "trocr": trocr_suggestion,
-            "easyocr": easyocr_suggestion
-        }
+        suggestions = {"trocr": trocr_suggestion, "easyocr": easyocr_suggestion}
 
         if trocr_suggestion["similaridade"] >= 85:
             accepted_suggestion = trocr_suggestion["sugestao"]
 
-    # Salvar a imagem original do campo
-    cropped = cropRegion(image, *coordinates)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    needs_review = not agreement and accepted_suggestion is None
     image_path = output_dir / f"questionario_{form_id}_{field_name}.png"
     saved_image = ""
 
-    if cropped.size > 0:
-        success, encoded = cv.imencode(".png", cropped)
+    if needs_review:
+        cropped = cropRegion(image, *coordinates)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        if success:
-            encoded.tofile(str(image_path))
-            saved_image = str(image_path)
+        if cropped.size > 0:
+            success, encoded = cv.imencode(".png", cropped)
+
+            if success:
+                encoded.tofile(str(image_path))
+                saved_image = str(image_path)
+    elif image_path.exists():
+        image_path.unlink()
 
     return {
         "valor": trocr_text if agreement else accepted_suggestion if accepted_suggestion else "VERIFICAR",
@@ -57,11 +52,11 @@ def compareHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int]
         "easyocr": easyocr_text,
         "concordancia": agreement,
         "sugestoes": suggestions,
-        "revisar": not agreement and accepted_suggestion is None,
-        "imagem": saved_image 
+        "revisar": needs_review,
+        "imagem": saved_image
     }
 
-def readHandwrittenFields(image: np.ndarray, text_fields: dict, objective_answers: dict, form_id: str, processor, trocr_model, easyocr_reader, output_dir: Path)->dict:
+def readHandwrittenFields(image: np.ndarray, text_fields: dict, objective_answers: dict, form_id: str, processor, trocr_model, easyocr_reader, output_dir: Path) ->dict:
 
     results =  {}
 

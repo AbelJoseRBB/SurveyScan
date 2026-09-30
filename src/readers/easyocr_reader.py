@@ -27,6 +27,6 @@ def readHandwritingEasyOCR(image: np.ndarray, coordinates: tuple[int, int, int, 
     )
 
     # Executa o reconhecimento
-    results = reader.readtext(cropped, detail= 0, paragraph= False)
+    results = reader.readtext(cropped, detail=0, paragraph=False)
 
     return " ".join(results).strip()

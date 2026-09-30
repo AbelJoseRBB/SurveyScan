@@ -86,19 +86,3 @@ def alignToTemplate(image: np.ndarray, template_data: dict) -> np.ndarray:
     height, width = template_data["shape"]
 
     return cv.warpPerspective(image, homography, (width, height), borderValue=(255, 255, 255))
-
-
-def saveProcessedImage(image: np.ndarray, output_path: str | Path) -> None:
-    """Salva uma imagem processada no caminho informado."""
-
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-
-    success, encoded = cv.imencode(output.suffix, image)
-
-    if not success:
-        raise RuntimeError(f"Não foi possível codificar a imagem: {output.name}")
-
-    encoded.tofile(str(output))
-
-    print(f"Imagem salva em: {output.resolve()}")

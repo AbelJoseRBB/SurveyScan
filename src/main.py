@@ -1,3 +1,5 @@
+import hashlib
+
 from config import INPUT_DIR, OUTPUT_DIR, QUESTION_COORDINATES, TEXT_FIELDS, ANO_COLETA, EXCEL_FILE
 from image_processor import pdfToImage, alignToTemplate, grayscaleImage, prepareTemplate
 from readers.answer_reader import readForm
@@ -6,7 +8,6 @@ from readers.handwriting_reader import loadHandwritingModel
 from readers.easyocr_reader import loadEasyOCR
 from readers.handwriting_comparison import readHandwrittenFields
 from excel_exporter import exportQuestionnaires
-import hashlib 
 
 
 TEMPLATE_FILE = INPUT_DIR / "FormsVazio.pdf"
@@ -31,7 +32,7 @@ def processQuestionnaire(pdf_path, form_id, template_data, svm_model, knn_model,
         processed_pages[i + 1] = grayscaleImage(aligned_page)
 
     objective_answers = readForm(processed_pages, QUESTION_COORDINATES)
-    numeric_answers = readNumericFields(processed_pages[1], TEXT_FIELDS[1], objective_answers, svm_model, knn_model, form_id, OUTPUT_DIR/ "revisao")
+    numeric_answers = readNumericFields(processed_pages[1], TEXT_FIELDS[1], objective_answers, svm_model, knn_model, form_id, OUTPUT_DIR / "revisao")
 
     date_value, date_review = readDate(processed_pages[2], TEXT_FIELDS[2]["data_coleta"], ANO_COLETA, svm_model, knn_model)
     date_answer = {"valor": date_value, "revisar": date_review}

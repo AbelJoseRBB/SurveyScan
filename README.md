@@ -236,8 +236,6 @@ SurveyScan/
 │
 ├── tools/
 │   ├── coordinate_picker.py
-│   ├── test_handwriting_models.py
-│   ├── test_numeric_models.py
 │   ├── train_digit_model.py
 │   └── train_digit_svm.py
 │
@@ -296,22 +294,6 @@ tools/coordinate_picker.py
 ```
 
 Ferramenta utilizada durante o desenvolvimento para identificar as coordenadas das regiões de interesse do formulário.
-
-### Benchmark de manuscritos
-
-```text
-tools/test_handwriting_models.py
-```
-
-Utilizado para avaliar estratégias de reconhecimento dos campos textuais manuscritos.
-
-### Benchmark de campos numéricos
-
-```text
-tools/test_numeric_models.py
-```
-
-Utilizado para comparar estratégias de reconhecimento dos campos numéricos.
 
 ### Treinamento dos modelos
 

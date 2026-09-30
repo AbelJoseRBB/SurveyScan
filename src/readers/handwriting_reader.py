@@ -14,7 +14,7 @@ def loadHandwritingModel():
 
     return processor, model
 
-def readHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int], processor, model)->str:
+def readHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int], processor, model) -> str:
     cropped = cropRegion(image, *coordinates)
 
     if cropped.size == 0:
@@ -35,12 +35,12 @@ def readHandwriting(image: np.ndarray, coordinates: tuple[int, int, int, int], p
     rgb = cv.cvtColor(cropped, cv.COLOR_GRAY2RGB)
     pil_image = Image.fromarray(rgb)
 
-    pixel_values = processor(images = pil_image, return_tensors = "pt").pixel_values
+    pixel_values = processor(images=pil_image, return_tensors="pt").pixel_values
 
     with torch.inference_mode():
-        generate_ids = model.generate(pixel_values, max_new_tokens = 32)
+        generate_ids = model.generate(pixel_values, max_new_tokens=32)
 
-    text = processor.batch_decode(generate_ids, skip_special_tokens = True)[0]
+    text = processor.batch_decode(generate_ids, skip_special_tokens =True)[0]
 
     return text.strip()
 
